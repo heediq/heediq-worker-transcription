@@ -65,7 +65,7 @@ jobs:
       # ECR registry cache (mode=max) so pip-install and model-weight layers are reused
       # across runs. Images are multi-GB so GHA cache (10 GB repo limit) would be evicted
       # immediately by the paid image; ECR has no practical size limit (~$0.10/GB/month).
-      - name: Build & push free image
+      - name: Build, push & export cache — free
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -79,7 +79,7 @@ jobs:
       # Paid tier — bakes the gated pyannote/speaker-diarization-3.1 pipeline at build time.
       # HF_TOKEN is mounted as a BuildKit secret (not an ENV/ARG) so it never persists in any
       # image layer or appears in this log.
-      - name: Build & push paid image
+      - name: Build, push & export cache — paid
         uses: docker/build-push-action@v6
         with:
           context: .
