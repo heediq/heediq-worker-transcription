@@ -1,0 +1,24 @@
+# Free tier: whisper small only (D-059, D-062, D-060). Model weights baked in at build time so
+# the EC2 GPU Spot task has zero network dependency at runtime — only the ECR pull on cold start.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    WHISPER_MODEL=small \
+    DIARIZE=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Bake the small model weights into the image (D-062) — first instantiation downloads + caches.
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+COPY src ./src
+
+ENTRYPOINT ["python3", "-m", "src.worker"]

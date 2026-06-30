@@ -1,0 +1,14 @@
+[project]
+name = "heediq-worker-transcription"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "faster_whisper", "faster_whisper.*", "pyannote.*"]
+ignore_missing_imports = true
