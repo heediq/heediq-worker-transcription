@@ -6,13 +6,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pyannote.audio import Pipeline
-
 DEFAULT_MODEL = "pyannote/speaker-diarization-3.1"
 
 
 class Diarizer:
     def __init__(self, model_name: str = DEFAULT_MODEL):
+        # Lazy import — pyannote.audio requires torch/torchaudio pinned to compatible
+        # versions baked into the Docker image. Importing at module level breaks CI where
+        # torch is installed unpinned and torchaudio.AudioMetaData may not exist.
+        from pyannote.audio import Pipeline
         self._pipeline = Pipeline.from_pretrained(model_name)
 
     def diarize(self, audio_path: Path) -> Any:
