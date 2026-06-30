@@ -62,6 +62,9 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       # Free tier — whisper small only, no gated model, no build secret needed.
+      # ECR registry cache (mode=max) so pip-install and model-weight layers are reused
+      # across runs. Images are multi-GB so GHA cache (10 GB repo limit) would be evicted
+      # immediately by the paid image; ECR has no practical size limit (~$0.10/GB/month).
       - name: Build & push free image
         uses: docker/build-push-action@v6
         with:
@@ -70,6 +73,8 @@ jobs:
           push: true
           tags: |
             ${{ env.ECR_REPO }}:free-${{ steps.sha.outputs.tag }}
+          cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-free
+          cache-to: type=registry,ref=${{ env.ECR_REPO }}:cache-free,mode=max
 
       # Paid tier — bakes the gated pyannote/speaker-diarization-3.1 pipeline at build time.
       # HF_TOKEN is mounted as a BuildKit secret (not an ENV/ARG) so it never persists in any
@@ -84,6 +89,8 @@ jobs:
             hf_token=${{ secrets.HF_TOKEN }}
           tags: |
             ${{ env.ECR_REPO }}:paid-${{ steps.sha.outputs.tag }}
+          cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-paid
+          cache-to: type=registry,ref=${{ env.ECR_REPO }}:cache-paid,mode=max
 
   promote-dev:
     name: Promote → dev
