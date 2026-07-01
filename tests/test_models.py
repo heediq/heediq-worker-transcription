@@ -39,6 +39,7 @@ def test_summarization_job_message_serializes_to_camel_case_keys():
         org_id="org-1",
         source_type="text",
         content_ref="rec-1",
+        tier="free",
     )
 
     body = json.loads(msg.to_json())
@@ -46,3 +47,4 @@ def test_summarization_job_message_serializes_to_camel_case_keys():
     assert body["jobId"] == "job-1"
     assert body["sourceType"] == "text"
     assert body["contentRef"] == "rec-1"
+    assert body["tier"] == "free"

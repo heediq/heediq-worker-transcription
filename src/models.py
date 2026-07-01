@@ -66,6 +66,7 @@ class SummarizationJobMessage:
     org_id: str
     source_type: SourceType
     content_ref: str
+    tier: Tier
 
     def to_json(self) -> str:
         return json.dumps(
@@ -75,5 +76,6 @@ class SummarizationJobMessage:
                 "orgId": self.org_id,
                 "sourceType": self.source_type,
                 "contentRef": self.content_ref,
+                "tier": self.tier,
             }
         )

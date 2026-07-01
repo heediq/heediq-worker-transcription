@@ -21,7 +21,7 @@ def _create_queue(sqs_client, name: str) -> str:
 def test_enqueue_summarization_job_sends_camel_case_body(sqs_client):
     queue_url = _create_queue(sqs_client, "heediq-summarization")
     message = SummarizationJobMessage(
-        job_id="job-1", recording_id="rec-1", org_id="org-1", source_type="text", content_ref="rec-1"
+        job_id="job-1", recording_id="rec-1", org_id="org-1", source_type="text", content_ref="rec-1", tier="paid"
     )
 
     enqueue_summarization_job(sqs_client, queue_url, message)
@@ -34,6 +34,7 @@ def test_enqueue_summarization_job_sends_camel_case_body(sqs_client):
         "orgId": "org-1",
         "sourceType": "text",
         "contentRef": "rec-1",
+        "tier": "paid",
     }
 
 
