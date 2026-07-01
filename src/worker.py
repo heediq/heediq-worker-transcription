@@ -81,6 +81,7 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
                 org_id=job.org_id,
                 source_type="text",
                 content_ref=job.recording_id,
+                tier=job.tier,
             ),
         )
 
