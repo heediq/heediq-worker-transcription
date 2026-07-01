@@ -62,6 +62,8 @@ orgId        string   — same org UUID
 sourceType   'text'   — transcript is written to DynamoDB, not S3 (no S3 write grant on task role)
 contentRef   string   — recordingId; heediq-worker-summarization reads transcript back from
                         heediq-recordings[recordingId].transcript
+tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage; summarization
+                        worker uses it to select the Claude model (D-067)
 ```
 
 ### Environment variables (injected by TranscriptionStack at RunTask time, D-038)
