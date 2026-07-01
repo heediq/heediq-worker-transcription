@@ -1,0 +1,4 @@
+-r requirements.in
+pytest>=8,<9
+moto[dynamodb,sqs,s3]>=5,<6
+mypy>=1.10,<2
