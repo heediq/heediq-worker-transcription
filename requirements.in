@@ -1,0 +1,9 @@
+boto3>=1.34,<2
+faster-whisper>=1.0,<2
+pyannote.audio>=3.1,<4
+# torch+torchaudio must match major.minor; pin together.
+torch>=2.4,<2.5
+torchaudio>=2.4,<2.5
+# huggingface_hub 1.x removed use_auth_token from hf_hub_download; pyannote.audio 3.x
+# still calls it internally and hasn't been updated to use token= yet.
+huggingface-hub>=0.14,<1.0
