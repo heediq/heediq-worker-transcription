@@ -28,7 +28,7 @@ JobStatus = Literal[
 @dataclass(frozen=True)
 class TranscriptionJobMessage:
     job_id: str
-    recording_id: str
+    source_id: str
     org_id: str
     audio_s3_key: str
     model: WhisperModelName
@@ -39,7 +39,7 @@ class TranscriptionJobMessage:
         data = json.loads(raw)
         return TranscriptionJobMessage(
             job_id=data["jobId"],
-            recording_id=data["recordingId"],
+            source_id=data["sourceId"],
             org_id=data["orgId"],
             audio_s3_key=data["audioS3Key"],
             model=data["model"],
@@ -50,7 +50,7 @@ class TranscriptionJobMessage:
         return json.dumps(
             {
                 "jobId": self.job_id,
-                "recordingId": self.recording_id,
+                "sourceId": self.source_id,
                 "orgId": self.org_id,
                 "audioS3Key": self.audio_s3_key,
                 "model": self.model,
@@ -62,7 +62,7 @@ class TranscriptionJobMessage:
 @dataclass(frozen=True)
 class SummarizationJobMessage:
     job_id: str
-    recording_id: str
+    source_id: str
     org_id: str
     source_type: SourceType
     content_ref: str
@@ -72,7 +72,7 @@ class SummarizationJobMessage:
         return json.dumps(
             {
                 "jobId": self.job_id,
-                "recordingId": self.recording_id,
+                "sourceId": self.source_id,
                 "orgId": self.org_id,
                 "sourceType": self.source_type,
                 "contentRef": self.content_ref,

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Python ECS worker that transcribes one meeting recording per container invocation. EventBridge Pipes is the SQS consumer — it launches a `RunTask` for each message and injects the job payload as the `SQS_MESSAGE_BODY` container-override env var (`<$.body>` dynamic path). There is no SQS receive/poll loop inside this process: one `RunTask` = one job (D-066).
+Python ECS worker that transcribes one audio Source per container invocation. EventBridge Pipes is the SQS consumer — it launches a `RunTask` for each message and injects the job payload as the `SQS_MESSAGE_BODY` container-override env var (`<$.body>` dynamic path). There is no SQS receive/poll loop inside this process: one `RunTask` = one job (D-066).
 
 Two separate images are built from this repo — one per tier — each with its model weights baked in at build time (D-062). The infra resolves which image to pull per environment from an SSM parameter (`/heediq/transcription/{free,paid}-image-tag`) managed by CI's promotion step, not by CDK.
 
@@ -34,7 +34,7 @@ main() in worker.py
        S3 download audio to /tmp (read-only grant on task role)
        transcribing → WhisperModel.transcribe()
        diarizing  → Diarizer.diarize()  [paid tier only; output not yet merged — MVP gap]
-       write transcript to heediq-recordings[recordingId].transcript
+       write transcript to heediq-sources[sourceId].transcript
        summarizing → enqueue SummarizationJobMessage to heediq-summarization
   4. on SIGTERM before or during step 3:
        retrying   → DynamoDB status write
@@ -47,7 +47,7 @@ main() in worker.py
 ### TranscriptionJobMessage (wire: camelCase JSON)
 ```
 jobId        string   — job UUID (primary key in heediq-jobs)
-recordingId  string   — recording UUID (primary key in heediq-recordings)
+sourceId     string   — Source UUID (primary key in heediq-sources)
 orgId        string   — org UUID
 audioS3Key   string   — S3 object key in heediq-audio-uploads-{env}
 model        string   — 'small' | 'large-v3'
@@ -57,11 +57,11 @@ tier         string   — 'free' | 'paid'
 ### SummarizationJobMessage enqueued on completion (wire: camelCase JSON)
 ```
 jobId        string   — same job UUID
-recordingId  string   — same recording UUID
+sourceId     string   — same Source UUID
 orgId        string   — same org UUID
 sourceType   'text'   — transcript is written to DynamoDB, not S3 (no S3 write grant on task role)
-contentRef   string   — recordingId; heediq-worker-summarization reads transcript back from
-                        heediq-recordings[recordingId].transcript
+contentRef   string   — sourceId; heediq-worker-summarization reads transcript back from
+                        heediq-sources[sourceId].transcript
 tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage; summarization
                         worker uses it to select the Claude model (D-067)
 ```
@@ -71,7 +71,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 |---|---|
 | `AWS_DEFAULT_REGION` | hardcoded `eu-west-1` in stack |
 | `JOBS_TABLE_NAME` | `heediq-jobs` |
-| `RECORDINGS_TABLE_NAME` | `heediq-recordings` |
+| `SOURCES_TABLE_NAME` | `heediq-sources` |
 | `AUDIO_BUCKET_NAME` | `heediq-audio-uploads-{env}` |
 | `TRANSCRIPTION_QUEUE_URL` | SQS queue URL (for SIGTERM re-enqueue, D-066) |
 | `SUMMARIZATION_QUEUE_URL` | SQS queue URL (enqueue after completion, D-065) |
@@ -81,14 +81,14 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 
 ### IAM task role grants (from TranscriptionStack)
 - S3 **read** on `heediq-audio-uploads-{env}` — no write grant (transcript goes to DynamoDB, not S3)
-- DynamoDB **read/write** on `heediq-jobs` and `heediq-recordings`
+- DynamoDB **read/write** on `heediq-jobs` and `heediq-sources`
 - SQS `sqs:SendMessage` on `heediq-summarization` (completion enqueue, D-065)
 - SQS `sqs:SendMessage` on `heediq-transcription` (SIGTERM re-enqueue, D-066)
 
 ## Dependencies
 
-- **Upstream:** heediq-infra `TranscriptionStack` (EventBridge Pipes, ECS task defs, IAM grants) + heediq-api recording enqueue (must set `tier` SQS message attribute or the Pipe filter silently drops the job)
-- **Downstream:** `heediq-worker-summarization` reads `transcript` from `heediq-recordings` by `recordingId` — `sourceType: 'text', contentRef: recordingId` in the enqueued message is the contract
+- **Upstream:** heediq-infra `TranscriptionStack` (EventBridge Pipes, ECS task defs, IAM grants) + heediq-api Source job enqueue (must set `tier` SQS message attribute or the Pipe filter silently drops the job)
+- **Downstream:** `heediq-worker-summarization` reads `transcript` from `heediq-sources` by `sourceId` — `sourceType: 'text', contentRef: sourceId` in the enqueued message is the contract
 
 ## Testing
 
@@ -105,7 +105,7 @@ CI runs both on every PR (`ci.yml`) and as the first job of every deploy (`deplo
 
 ## Gotchas & Constraints
 
-- **No S3 write grant on the task role.** The TranscriptionStack only grants `grantRead` on the audio bucket. Transcript text is written directly to `heediq-recordings[recordingId].transcript` in DynamoDB, not to S3. `heediq-worker-summarization` must read from DynamoDB by `recordingId`, not from an S3 key.
+- **No S3 write grant on the task role.** The TranscriptionStack only grants `grantRead` on the audio bucket. Transcript text is written directly to `heediq-sources[sourceId].transcript` in DynamoDB, not to S3. `heediq-worker-summarization` must read from DynamoDB by `sourceId`, not from an S3 key.
 - **Diarization output is not yet merged into transcript text (MVP gap).** `Diarizer.diarize()` is called and the output is returned, but speaker labels are not currently interleaved into the transcript string. Tracked as a known gap — not silently dropped.
 - **pyannote/speaker-diarization-3.1 is a gated HuggingFace model.** Building `Dockerfile.paid` requires an `HF_TOKEN` GitHub secret (added via Settings → Secrets). The token is never persisted in an image layer — it's injected via `--mount=type=secret,id=hf_token` (BuildKit) and read only during the `Pipeline.from_pretrained()` call baked into the image at build time.
 - **SSM parameters must be seeded before the first infra deploy.** TranscriptionStack resolves image tags from `/heediq/transcription/{free,paid}-image-tag` via a CloudFormation dynamic reference. These parameters must exist in each workload account before the first `cdk deploy TranscriptionStack`. `heediq-infra/scripts/setup.sh` section 3 seeds them automatically (idempotent — skips if already set). If seeding manually: `aws ssm put-parameter --name /heediq/transcription/free-image-tag --value free --type String`. After CI's first promote run, CI owns the value and `setup.sh` will no longer overwrite it.

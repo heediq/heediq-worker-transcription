@@ -21,7 +21,7 @@ def _create_queue(sqs_client, name: str) -> str:
 def test_enqueue_summarization_job_sends_camel_case_body(sqs_client):
     queue_url = _create_queue(sqs_client, "heediq-summarization")
     message = SummarizationJobMessage(
-        job_id="job-1", recording_id="rec-1", org_id="org-1", source_type="text", content_ref="rec-1", tier="paid"
+        job_id="job-1", source_id="rec-1", org_id="org-1", source_type="text", content_ref="rec-1", tier="paid"
     )
 
     enqueue_summarization_job(sqs_client, queue_url, message)
@@ -30,7 +30,7 @@ def test_enqueue_summarization_job_sends_camel_case_body(sqs_client):
     body = json.loads(received["Body"])
     assert body == {
         "jobId": "job-1",
-        "recordingId": "rec-1",
+        "sourceId": "rec-1",
         "orgId": "org-1",
         "sourceType": "text",
         "contentRef": "rec-1",
@@ -44,7 +44,7 @@ def test_requeue_transcription_job_sets_tier_message_attribute(sqs_client):
     queue_url = _create_queue(sqs_client, "heediq-transcription")
     message = TranscriptionJobMessage(
         job_id="job-1",
-        recording_id="rec-1",
+        source_id="rec-1",
         org_id="org-1",
         audio_s3_key="key.wav",
         model="large-v3",
