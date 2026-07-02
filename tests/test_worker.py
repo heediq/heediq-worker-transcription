@@ -13,7 +13,7 @@ from src.status_writer import StatusWriter
 from src.worker import Clients, install_sigterm_handler, run_job
 
 JOBS_TABLE = "heediq-jobs"
-RECORDINGS_TABLE = "heediq-recordings"
+SOURCES_TABLE = "heediq-sources"
 AUDIO_BUCKET = "heediq-audio"
 
 
@@ -29,12 +29,12 @@ def aws_clients(worker_env):
         )
         dynamodb.put_item(TableName=JOBS_TABLE, Item={"jobId": {"S": "job-1"}, "status": {"S": "queued"}})
         dynamodb.create_table(
-            TableName=RECORDINGS_TABLE,
-            KeySchema=[{"AttributeName": "recordingId", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "recordingId", "AttributeType": "S"}],
+            TableName=SOURCES_TABLE,
+            KeySchema=[{"AttributeName": "sourceId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "sourceId", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-        dynamodb.put_item(TableName=RECORDINGS_TABLE, Item={"recordingId": {"S": "rec-1"}})
+        dynamodb.put_item(TableName=SOURCES_TABLE, Item={"sourceId": {"S": "rec-1"}})
 
         s3 = boto3.client("s3", region_name="eu-west-1")
         s3.create_bucket(Bucket=AUDIO_BUCKET, CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
@@ -67,10 +67,10 @@ def test_run_job_writes_status_progression_and_enqueues_summarization(mock_trans
     item = aws_clients.dynamodb.get_item(TableName=JOBS_TABLE, Key={"jobId": {"S": "job-1"}})["Item"]
     assert item["status"]["S"] == "summarizing"
 
-    recording = aws_clients.dynamodb.get_item(
-        TableName=RECORDINGS_TABLE, Key={"recordingId": {"S": "rec-1"}}
+    source = aws_clients.dynamodb.get_item(
+        TableName=SOURCES_TABLE, Key={"sourceId": {"S": "rec-1"}}
     )["Item"]
-    assert recording["transcript"]["S"] == "hello world"
+    assert source["transcript"]["S"] == "hello world"
 
     queue_url = _summarization_queue_url(aws_clients.sqs)
     received = aws_clients.sqs.receive_message(QueueUrl=queue_url)["Messages"][0]

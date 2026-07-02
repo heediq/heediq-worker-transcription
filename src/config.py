@@ -12,7 +12,7 @@ from dataclasses import dataclass
 class Config:
     aws_region: str
     jobs_table: str
-    recordings_table: str
+    sources_table: str
     audio_bucket: str
     transcription_queue_url: str
     summarization_queue_url: str
@@ -25,7 +25,7 @@ def load_config() -> Config:
     return Config(
         aws_region=os.environ["AWS_DEFAULT_REGION"],
         jobs_table=os.environ["JOBS_TABLE_NAME"],
-        recordings_table=os.environ["RECORDINGS_TABLE_NAME"],
+        sources_table=os.environ["SOURCES_TABLE_NAME"],
         audio_bucket=os.environ["AUDIO_BUCKET_NAME"],
         transcription_queue_url=os.environ["TRANSCRIPTION_QUEUE_URL"],
         summarization_queue_url=os.environ["SUMMARIZATION_QUEUE_URL"],

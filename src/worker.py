@@ -68,8 +68,8 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
             # a known gap, not silently dropped (see README Gotchas).
 
         # No S3 write grant on the task role (only grantRead) — the transcript is written onto
-        # the recording row itself. The summarization worker reads it back by recordingId.
-        write_transcript(clients.dynamodb, config.recordings_table, job.recording_id, transcript)
+        # the source row itself. The summarization worker reads it back by sourceId.
+        write_transcript(clients.dynamodb, config.sources_table, job.source_id, transcript)
 
         status_writer.write(job.job_id, "summarizing")
         enqueue_summarization_job(
@@ -77,19 +77,19 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
             config.summarization_queue_url,
             SummarizationJobMessage(
                 job_id=job.job_id,
-                recording_id=job.recording_id,
+                source_id=job.source_id,
                 org_id=job.org_id,
                 source_type="text",
-                content_ref=job.recording_id,
+                content_ref=job.source_id,
                 tier=job.tier,
             ),
         )
 
 
-def write_transcript(dynamodb_client: Any, recordings_table: str, recording_id: str, transcript: str) -> None:
+def write_transcript(dynamodb_client: Any, sources_table: str, source_id: str, transcript: str) -> None:
     dynamodb_client.update_item(
-        TableName=recordings_table,
-        Key={"recordingId": {"S": recording_id}},
+        TableName=sources_table,
+        Key={"sourceId": {"S": source_id}},
         UpdateExpression="SET transcript = :t",
         ExpressionAttributeValues={":t": {"S": transcript}},
     )
