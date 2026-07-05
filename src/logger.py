@@ -4,16 +4,28 @@ Mirrors heediq-shared/src/logger.ts's JSON shape and PII denylist — this worke
 can't import the TS package, so the contract is hand-mirrored here the same way models.py already
 hand-mirrors @heediq/shared's schemas (D-068). Correlation is by source_id (job.source_id), same
 convention as the TS services.
+
+Level filtering (D-093): default threshold is "info" in every environment — "debug" is the only
+level silent by default. Read from LOG_LEVEL on each write (this is a one-shot batch task, not a
+long-lived process, so there's no cold-start caching benefit) so ops can flip the env var to
+"debug" for a rerun without a code change.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
 
 _REDACTED = "[REDACTED]"
 _DENYLIST = ("transcript", "email", "audiourl", "password", "token", "secret", "authorization")
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3}
+
+
+def _resolve_threshold() -> str:
+    raw = os.environ.get("LOG_LEVEL", "").lower()
+    return raw if raw in _LEVEL_ORDER else "info"
 
 
 def _is_denylisted(key: str) -> bool:
@@ -34,6 +46,8 @@ class StructuredLogger:
         self._service = service
 
     def _write(self, level: str, message: str, **meta: Any) -> None:
+        if _LEVEL_ORDER[level] < _LEVEL_ORDER[_resolve_threshold()]:
+            return
         line = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level,
@@ -43,6 +57,9 @@ class StructuredLogger:
         }
         stream = sys.stderr if level in ("warn", "error") else sys.stdout
         print(json.dumps(line), file=stream)
+
+    def debug(self, message: str, **meta: Any) -> None:
+        self._write("debug", message, **meta)
 
     def info(self, message: str, **meta: Any) -> None:
         self._write("info", message, **meta)
