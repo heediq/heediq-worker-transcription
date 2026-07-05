@@ -49,7 +49,7 @@ main() in worker.py
 jobId        string   — job UUID (primary key in heediq-jobs)
 sourceId     string   — Source UUID (primary key in heediq-sources)
 orgId        string   — org UUID
-audioS3Key   string   — S3 object key in heediq-audio-uploads-{env}
+audioS3Key   string   — S3 object key in heediq-audio-uploads-{accountId}
 model        string   — 'small' | 'large-v3'
 tier         string   — 'free' | 'paid'
 ```
@@ -72,7 +72,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 | `AWS_DEFAULT_REGION` | hardcoded `eu-west-1` in stack |
 | `JOBS_TABLE_NAME` | `heediq-jobs` |
 | `SOURCES_TABLE_NAME` | `heediq-sources` |
-| `AUDIO_BUCKET_NAME` | `heediq-audio-uploads-{env}` |
+| `AUDIO_BUCKET_NAME` | `heediq-audio-uploads-{accountId}` (bucket name is account-ID-suffixed for S3 global-uniqueness, not env-suffixed — account IS the environment per D-037) |
 | `TRANSCRIPTION_QUEUE_URL` | SQS queue URL (for SIGTERM re-enqueue, D-066) |
 | `SUMMARIZATION_QUEUE_URL` | SQS queue URL (enqueue after completion, D-065) |
 | `SQS_MESSAGE_BODY` | raw SQS message body, set by Pipe's `<$.body>` container override |
@@ -80,8 +80,8 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 | `DIARIZE` | baked into image: `false` (free) or `true` (paid) |
 
 ### IAM task role grants (from TranscriptionStack)
-- S3 **read** on `heediq-audio-uploads-{env}` — no write grant (transcript goes to DynamoDB, not S3)
-- DynamoDB **read/write** on `heediq-jobs` and `heediq-sources`
+- S3 **read** on `heediq-audio-uploads-{accountId}` — no write grant (transcript goes to DynamoDB, not S3)
+- DynamoDB **write-only** on `heediq-jobs` and `heediq-sources` (the worker only ever `update_item`s status/transcript; it never reads either table)
 - SQS `sqs:SendMessage` on `heediq-summarization` (completion enqueue, D-065)
 - SQS `sqs:SendMessage` on `heediq-transcription` (SIGTERM re-enqueue, D-066)
 
