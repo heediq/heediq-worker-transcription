@@ -1,3 +1,5 @@
+import json
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -31,11 +33,13 @@ def test_write_updates_status_and_updated_at(dynamodb_client):
     assert "updatedAt" in item
 
 
-def test_write_does_not_log_pii(dynamodb_client, caplog):
+def test_write_logs_structured_json_with_ids_and_status(dynamodb_client, capsys):
     writer = StatusWriter(dynamodb_client, JOBS_TABLE)
 
-    with caplog.at_level("INFO"):
-        writer.write("job-1", "transcribing")
+    writer.write("job-1", "transcribing", source_id="src-1")
 
-    assert "job-1" in caplog.text
-    assert "transcribing" in caplog.text
+    line = json.loads(capsys.readouterr().out.strip())
+    assert line["job_id"] == "job-1"
+    assert line["source_id"] == "src-1"
+    assert line["status"] == "transcribing"
+    assert line["service"] == "heediq-worker-transcription"

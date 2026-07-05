@@ -3,13 +3,13 @@ DDB Streams -> Status Pusher Lambda -> WebSocket (D-061) — this module only ow
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from .logger import create_logger
 from .models import JobStatus
 
-logger = logging.getLogger(__name__)
+logger = create_logger("heediq-worker-transcription")
 
 
 class StatusWriter:
@@ -17,9 +17,10 @@ class StatusWriter:
         self._client = dynamodb_client
         self._jobs_table = jobs_table
 
-    def write(self, job_id: str, status: JobStatus) -> None:
-        # IDs and status only — never log transcript text or audio keys (D-038 PII rule).
-        logger.info("job %s -> %s", job_id, status)
+    def write(self, job_id: str, status: JobStatus, source_id: str | None = None) -> None:
+        # IDs and status only — never log transcript text or audio keys (D-038 PII rule); the
+        # logger's own denylist also strips it if ever accidentally passed as metadata.
+        logger.info("Job status changed", job_id=job_id, source_id=source_id, status=status)
         self._client.update_item(
             TableName=self._jobs_table,
             Key={"jobId": {"S": job_id}},

@@ -14,6 +14,7 @@ Two separate images are built from this repo — one per tier — each with its 
 - `src/transcriber.py` — `faster-whisper` `WhisperModel` wrapper (model baked into image, no runtime download)
 - `src/diarizer.py` — `pyannote.audio` `Pipeline` wrapper (paid tier only; gated HuggingFace model, D-059/D-062)
 - `src/status_writer.py` — DynamoDB `update_item` for job status stages (fan-out to client via DDB Streams → Status Pusher Lambda → WebSocket, D-061)
+- `src/logger.py` — `create_logger(service)` structured JSON logger, hand-mirroring `@heediq/shared`'s `logger.ts` shape, PII denylist, and `LOG_LEVEL`-gated `debug`/`info`/`warn`/`error` threshold (default `info`) since this worker can't import the TS package (D-085, D-093); correlates by `source_id`
 - `src/sqs_client.py` — SQS sends: enqueue to `heediq-summarization` on completion (D-065); re-enqueue to `heediq-transcription` on SIGTERM with `tier` attribute preserved (D-066)
 - `Dockerfile.free` — base `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`; bakes `whisper small` weights; `WHISPER_MODEL=small DIARIZE=false`
 - `Dockerfile.paid` — same base; bakes `whisper large-v3` + pyannote speaker-diarization-3.1 via BuildKit secret mount (`--mount=type=secret,id=hf_token`); `WHISPER_MODEL=large-v3 DIARIZE=true`
@@ -29,14 +30,15 @@ EventBridge Pipe (heediq-infra TranscriptionStack)
 main() in worker.py
   1. parse TranscriptionJobMessage from SQS_MESSAGE_BODY
   2. install SIGTERM handler (Spot interruption re-enqueue, D-066)
-  3. run_job():
+  3. every stage logs a structured JSON line via logger.py, correlated by source_id (D-085)
+  4. run_job():
        starting   → DynamoDB status write
        S3 download audio to /tmp (read-only grant on task role)
        transcribing → WhisperModel.transcribe()
        diarizing  → Diarizer.diarize()  [paid tier only; output not yet merged — MVP gap]
        write transcript to heediq-sources[sourceId].transcript
        summarizing → enqueue SummarizationJobMessage to heediq-summarization
-  4. on SIGTERM before or during step 3:
+  5. on SIGTERM before or during step 4:
        retrying   → DynamoDB status write
        re-enqueue TranscriptionJobMessage to heediq-transcription with tier attribute
        sys.exit(0)
@@ -107,4 +109,6 @@ CI runs both on every PR (`ci.yml`) and as the first job of every deploy (`deplo
 
 - **pyannote/speaker-diarization-3.1 is a gated HuggingFace model.** Building `Dockerfile.paid` requires an `HF_TOKEN` GitHub secret (added via Settings → Secrets). The token is never persisted in an image layer — it's injected via `--mount=type=secret,id=hf_token` (BuildKit) and read only during the `Pipeline.from_pretrained()` call baked into the image at build time.
 - **SSM parameters must be seeded before the first infra deploy.** TranscriptionStack resolves image tags from `/heediq/transcription/{free,paid}-image-tag` via a CloudFormation dynamic reference. These parameters must exist in each workload account before the first `cdk deploy TranscriptionStack`. `heediq-infra/scripts/setup.sh` section 3 seeds them automatically (idempotent — skips if already set). If seeding manually: `aws ssm put-parameter --name /heediq/transcription/free-image-tag --value free --type String`. After CI's first promote run, CI owns the value and `setup.sh` will no longer overwrite it.
+- **`logger.py` bypasses stdlib `logging` entirely (D-085)** — it `print()`s JSON directly to stdout (info) / stderr (warn, error), matching the ECS `awslogs` driver's line-based capture. Tests must use pytest's `capsys` fixture to assert on log output, not `caplog` (which only captures stdlib `logging` records).
+- **`debug` calls are silent unless `LOG_LEVEL=debug` (D-093).** Default threshold is `info` on every run; to get verbose output for a one-off rerun, set the `LOG_LEVEL` container/task env var to `debug` (no code change or image rebuild needed). An invalid value falls back to `info`.
 - **Local Python version mismatch.** Dev machines may only have Python 3.9 (macOS system default). `pyproject.toml` declares `requires-python = ">=3.11"` matching the Dockerfiles and CI; use `actions/setup-python@v5` with `python-version: '3.11'` in CI. Local 3.9 works for running tests but is not the target runtime.
