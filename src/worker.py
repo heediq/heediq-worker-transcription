@@ -4,10 +4,10 @@ by the Pipe's `<$.body>` dynamic path reference. There is no SQS receive/poll lo
 """
 from __future__ import annotations
 
-import logging
 import signal
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -16,13 +16,13 @@ import boto3
 
 from .config import Config, load_config
 from .diarizer import Diarizer
+from .logger import create_logger
 from .models import SummarizationJobMessage, TranscriptionJobMessage
 from .sqs_client import enqueue_summarization_job, requeue_transcription_job
 from .status_writer import StatusWriter
 from .transcriber import Transcriber
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = create_logger("heediq-worker-transcription")
 
 
 class Clients:
@@ -43,8 +43,8 @@ def install_sigterm_handler(
         # deletes the SQS message as soon as it hands the job to RunTask, before this process
         # even starts — there is no visibility timeout left to expire by the time SIGTERM
         # arrives, so retry must be an explicit re-enqueue.
-        logger.warning("SIGTERM received for job %s — re-enqueueing for retry", job.job_id)
-        status_writer.write(job.job_id, "retrying")
+        logger.warn("SIGTERM received — re-enqueueing for retry", job_id=job.job_id, source_id=job.source_id)
+        status_writer.write(job.job_id, "retrying", job.source_id)
         requeue_transcription_job(sqs_client, config.transcription_queue_url, job)
         sys.exit(0)
 
@@ -52,17 +52,18 @@ def install_sigterm_handler(
 
 
 def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, status_writer: StatusWriter) -> None:
-    status_writer.write(job.job_id, "starting")
+    logger.info("Transcription job started", job_id=job.job_id, source_id=job.source_id, tier=job.tier)
+    status_writer.write(job.job_id, "starting", job.source_id)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         audio_path = Path(tmp_dir) / "audio"
         clients.s3.download_file(config.audio_bucket, job.audio_s3_key, str(audio_path))
 
-        status_writer.write(job.job_id, "transcribing")
+        status_writer.write(job.job_id, "transcribing", job.source_id)
         transcript = Transcriber(config.whisper_model).transcribe(audio_path)
 
         if config.diarize:
-            status_writer.write(job.job_id, "diarizing")
+            status_writer.write(job.job_id, "diarizing", job.source_id)
             Diarizer().diarize(audio_path)
             # MVP: diarization output is not yet merged into the transcript text — tracked as
             # a known gap, not silently dropped (see README Gotchas).
@@ -71,7 +72,7 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
         # the source row itself. The summarization worker reads it back by sourceId.
         write_transcript(clients.dynamodb, config.sources_table, job.source_id, transcript)
 
-        status_writer.write(job.job_id, "summarizing")
+        status_writer.write(job.job_id, "summarizing", job.source_id)
         enqueue_summarization_job(
             clients.sqs,
             config.summarization_queue_url,
@@ -105,9 +106,15 @@ def main() -> None:
 
     try:
         run_job(job, config, clients, status_writer)
-    except Exception:
-        logger.exception("job %s failed", job.job_id)
-        status_writer.write(job.job_id, "failed")
+    except Exception as exc:
+        logger.error(
+            "Transcription job failed",
+            job_id=job.job_id,
+            source_id=job.source_id,
+            error=str(exc),
+            stack=traceback.format_exc(),
+        )
+        status_writer.write(job.job_id, "failed", job.source_id)
         raise
 
 
