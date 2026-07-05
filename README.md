@@ -97,7 +97,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest -q          # 11 tests, ~3s
+pytest -q          # 16 tests, ~1.5s
 mypy src           # strict, ignore_missing_imports for boto3/faster_whisper/pyannote
 ```
 
