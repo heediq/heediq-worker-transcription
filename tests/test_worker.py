@@ -21,20 +21,31 @@ AUDIO_BUCKET = "heediq-audio"
 def aws_clients(worker_env):
     with mock_aws():
         dynamodb = boto3.client("dynamodb", region_name="eu-west-1")
+        # Matches the real deployed schemas (heediq-infra foundation-stack.ts): jobs is keyed
+        # by sourceId alone (no jobId sort key); sources is a composite orgId+sourceId key.
         dynamodb.create_table(
             TableName=JOBS_TABLE,
-            KeySchema=[{"AttributeName": "jobId", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "jobId", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST",
-        )
-        dynamodb.put_item(TableName=JOBS_TABLE, Item={"jobId": {"S": "job-1"}, "status": {"S": "queued"}})
-        dynamodb.create_table(
-            TableName=SOURCES_TABLE,
             KeySchema=[{"AttributeName": "sourceId", "KeyType": "HASH"}],
             AttributeDefinitions=[{"AttributeName": "sourceId", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-        dynamodb.put_item(TableName=SOURCES_TABLE, Item={"sourceId": {"S": "rec-1"}})
+        dynamodb.put_item(
+            TableName=JOBS_TABLE,
+            Item={"sourceId": {"S": "rec-1"}, "jobId": {"S": "job-1"}, "status": {"S": "queued"}},
+        )
+        dynamodb.create_table(
+            TableName=SOURCES_TABLE,
+            KeySchema=[
+                {"AttributeName": "orgId", "KeyType": "HASH"},
+                {"AttributeName": "sourceId", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "orgId", "AttributeType": "S"},
+                {"AttributeName": "sourceId", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        dynamodb.put_item(TableName=SOURCES_TABLE, Item={"orgId": {"S": "org-1"}, "sourceId": {"S": "rec-1"}})
 
         s3 = boto3.client("s3", region_name="eu-west-1")
         s3.create_bucket(Bucket=AUDIO_BUCKET, CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
@@ -64,11 +75,11 @@ def test_run_job_writes_status_progression_and_enqueues_summarization(mock_trans
 
     run_job(job, config, aws_clients, status_writer)
 
-    item = aws_clients.dynamodb.get_item(TableName=JOBS_TABLE, Key={"jobId": {"S": "job-1"}})["Item"]
+    item = aws_clients.dynamodb.get_item(TableName=JOBS_TABLE, Key={"sourceId": {"S": "rec-1"}})["Item"]
     assert item["status"]["S"] == "summarizing"
 
     source = aws_clients.dynamodb.get_item(
-        TableName=SOURCES_TABLE, Key={"sourceId": {"S": "rec-1"}}
+        TableName=SOURCES_TABLE, Key={"orgId": {"S": "org-1"}, "sourceId": {"S": "rec-1"}}
     )["Item"]
     assert source["transcript"]["S"] == "hello world"
 
@@ -118,7 +129,7 @@ def test_sigterm_handler_writes_retrying_status_and_requeues_job(aws_clients):
     finally:
         signal.signal(signal.SIGTERM, original_handler)
 
-    item = aws_clients.dynamodb.get_item(TableName=JOBS_TABLE, Key={"jobId": {"S": "job-1"}})["Item"]
+    item = aws_clients.dynamodb.get_item(TableName=JOBS_TABLE, Key={"sourceId": {"S": "rec-1"}})["Item"]
     assert item["status"]["S"] == "retrying"
 
     queue_url = aws_clients.sqs.get_queue_url(QueueName="heediq-transcription")["QueueUrl"]

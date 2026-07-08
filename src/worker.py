@@ -70,7 +70,7 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
 
         # No S3 write grant on the task role (only grantRead) — the transcript is written onto
         # the source row itself. The summarization worker reads it back by sourceId.
-        write_transcript(clients.dynamodb, config.sources_table, job.source_id, transcript)
+        write_transcript(clients.dynamodb, config.sources_table, job.org_id, job.source_id, transcript)
 
         status_writer.write(job.job_id, "summarizing", job.source_id)
         enqueue_summarization_job(
@@ -87,10 +87,13 @@ def run_job(job: TranscriptionJobMessage, config: Config, clients: Clients, stat
         )
 
 
-def write_transcript(dynamodb_client: Any, sources_table: str, source_id: str, transcript: str) -> None:
+def write_transcript(
+    dynamodb_client: Any, sources_table: str, org_id: str, source_id: str, transcript: str
+) -> None:
+    # heediq-sources' key is composite: pk=orgId, sk=sourceId.
     dynamodb_client.update_item(
         TableName=sources_table,
-        Key={"sourceId": {"S": source_id}},
+        Key={"orgId": {"S": org_id}, "sourceId": {"S": source_id}},
         UpdateExpression="SET transcript = :t",
         ExpressionAttributeValues={":t": {"S": transcript}},
     )
