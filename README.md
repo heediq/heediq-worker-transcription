@@ -48,8 +48,10 @@ main() in worker.py
 
 ### TranscriptionJobMessage (wire: camelCase JSON)
 ```
-jobId        string   — job UUID (primary key in heediq-jobs)
-sourceId     string   — Source UUID (primary key in heediq-sources)
+jobId        string   — job UUID (plain attribute in heediq-jobs, NOT part of its key —
+                        heediq-jobs' only key attribute is sourceId, no sort key)
+sourceId     string   — Source UUID (key attribute in heediq-jobs; sort key of heediq-sources'
+                        composite key pk=orgId + sk=sourceId)
 orgId        string   — org UUID
 audioS3Key   string   — S3 object key in heediq-audio-uploads-{accountId}
 model        string   — 'small' | 'large-v3'
@@ -83,7 +85,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 
 ### IAM task role grants (from TranscriptionStack)
 - S3 **read** on `heediq-audio-uploads-{accountId}` — no write grant (transcript goes to DynamoDB, not S3)
-- DynamoDB **write-only** on `heediq-jobs` and `heediq-sources` (the worker only ever `update_item`s status/transcript; it never reads either table)
+- DynamoDB **write-only** on `heediq-jobs` and `heediq-sources` (the worker only ever `update_item`s status/transcript; it never reads either table). Writes key `heediq-jobs` by `sourceId` alone and `heediq-sources` by its composite `orgId`+`sourceId` key.
 - SQS `sqs:SendMessage` on `heediq-summarization` (completion enqueue, D-065)
 - SQS `sqs:SendMessage` on `heediq-transcription` (SIGTERM re-enqueue, D-066)
 
