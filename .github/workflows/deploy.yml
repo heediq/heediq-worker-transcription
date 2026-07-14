@@ -79,6 +79,11 @@ jobs:
           context: .
           file: Dockerfile.free
           push: true
+          # provenance/sbom default to true on v6 and push extra attestation manifests that
+          # ECR's untagged-image lifecycle rule can't clean up (still index-referenced by the
+          # tag) — D-108, this was the main driver of unbounded ECR storage growth.
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.ECR_REPO }}:free-${{ steps.sha.outputs.tag }}
           cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-free
@@ -93,6 +98,8 @@ jobs:
           context: .
           file: Dockerfile.paid
           push: true
+          provenance: false
+          sbom: false
           secrets: |
             hf_token=${{ secrets.HF_TOKEN }}
           tags: |
