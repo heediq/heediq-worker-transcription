@@ -1,6 +1,6 @@
-"""Entrypoint. One ECS RunTask = one job (D-066): EventBridge Pipes is the SQS consumer, not
-this process — the job payload arrives via the SQS_MESSAGE_BODY container-override env var, set
-by the Pipe's `<$.body>` dynamic path reference. There is no SQS receive/poll loop here.
+"""Entrypoint. One ECS RunTask = one job (D-066): the dispatcher Lambda is the SQS consumer, not
+this process (D-157) — the job payload arrives via the SQS_MESSAGE_BODY container-override env var
+the dispatcher sets from the raw message body. There is no SQS receive/poll loop here.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def install_sigterm_handler(
     sqs_client: Any,
 ) -> None:
     def handle_sigterm(signum: int, frame: FrameType | None) -> None:
-        # Spot interruption (D-066, supersedes D-059's original mechanism): EventBridge Pipes
+        # Spot interruption (D-066, supersedes D-059's original mechanism): the dispatcher Lambda
         # deletes the SQS message as soon as it hands the job to RunTask, before this process
         # even starts — there is no visibility timeout left to expire by the time SIGTERM
         # arrives, so retry must be an explicit re-enqueue.

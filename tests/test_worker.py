@@ -133,5 +133,7 @@ def test_sigterm_handler_writes_retrying_status_and_requeues_job(aws_clients):
     assert item["status"]["S"] == "retrying"
 
     queue_url = aws_clients.sqs.get_queue_url(QueueName="heediq-transcription")["QueueUrl"]
-    received = aws_clients.sqs.receive_message(QueueUrl=queue_url, MessageAttributeNames=["tier"])["Messages"][0]
-    assert received["MessageAttributes"]["tier"]["StringValue"] == "free"
+    received = aws_clients.sqs.receive_message(QueueUrl=queue_url, MessageAttributeNames=["All"])["Messages"][0]
+    # D-157: tier is carried in the body for the dispatcher to route on — no SQS attribute.
+    assert "MessageAttributes" not in received
+    assert json.loads(received["Body"])["tier"] == "free"
