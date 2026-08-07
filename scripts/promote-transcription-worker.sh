@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Promotes a freshly-pushed sha-tagged image (built by .github/workflows/deploy.yml) into the
-# current AWS account: writes the per-tier image tag to SSM, registers a new task-definition
-# revision per tier, and points each tier's EventBridge Pipe at it. There is no ECS Service in
-# this architecture (Pipes invokes RunTask directly per job, D-066) — no `update-service` step.
+# current AWS account: writes the per-tier image tag to SSM and registers a new task-definition
+# revision per tier. The dispatcher Lambda runs tasks by FAMILY (D-157), so it picks up the new
+# revision automatically — no pipe/target/service update step. There is no ECS Service in this
+# architecture (RunTask is invoked per job, D-066) — no `update-service` step either.
 #
 # Usage: promote-transcription-worker.sh <sha-tag>   (e.g. sha-abc1234)
 # Requires AWS credentials for the target account already configured in the environment.
@@ -15,7 +16,6 @@ promote_tier() {
   local tier=$1
   local image="${ECR_REPO}:${tier}-${SHA_TAG}"
   local family="heediq-transcription-${tier}"
-  local pipe="heediq-transcription-${tier}"
   local ssm_param="/heediq/transcription/${tier}-image-tag"
 
   echo "[${tier}] promoting ${image}"
@@ -32,13 +32,7 @@ promote_tier() {
      | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
   new_arn=$(aws ecs register-task-definition --cli-input-json "$new_task_def" --query 'taskDefinition.taskDefinitionArn' --output text)
 
-  local pipe_role
-  pipe_role=$(aws pipes describe-pipe --name "$pipe" --query 'RoleArn' --output text)
-  aws pipes update-pipe --name "$pipe" \
-    --role-arn "$pipe_role" \
-    --target-parameters "{\"EcsTaskParameters\":{\"TaskDefinitionArn\":\"${new_arn}\"}}"
-
-  echo "[${tier}] pipe ${pipe} now targets ${new_arn}"
+  echo "[${tier}] registered ${new_arn} — dispatcher runs by family, picks it up on the next job"
 }
 
 promote_tier free

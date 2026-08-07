@@ -38,9 +38,9 @@ def test_enqueue_summarization_job_sends_camel_case_body(sqs_client):
     }
 
 
-def test_requeue_transcription_job_sets_tier_message_attribute(sqs_client):
-    # The EventBridge Pipe filter only matches on this attribute (see transcription-stack.ts) —
-    # if a requeue ever drops it, the job would silently never be picked up again (D-066).
+def test_requeue_transcription_job_carries_tier_in_body_no_message_attribute(sqs_client):
+    # D-157: the dispatcher Lambda routes on `tier` in the message body, not an SQS attribute.
+    # The requeue must carry tier in the body (it always did, via to_json) and set no attribute.
     queue_url = _create_queue(sqs_client, "heediq-transcription")
     message = TranscriptionJobMessage(
         job_id="job-1",
@@ -53,5 +53,6 @@ def test_requeue_transcription_job_sets_tier_message_attribute(sqs_client):
 
     requeue_transcription_job(sqs_client, queue_url, message)
 
-    received = sqs_client.receive_message(QueueUrl=queue_url, MessageAttributeNames=["tier"])["Messages"][0]
-    assert received["MessageAttributes"]["tier"]["StringValue"] == "paid"
+    received = sqs_client.receive_message(QueueUrl=queue_url, MessageAttributeNames=["All"])["Messages"][0]
+    assert "MessageAttributes" not in received
+    assert json.loads(received["Body"])["tier"] == "paid"

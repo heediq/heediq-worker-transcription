@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Python ECS worker that transcribes one audio Source per container invocation. EventBridge Pipes is the SQS consumer — it launches a `RunTask` for each message and injects the job payload as the `SQS_MESSAGE_BODY` container-override env var (`<$.body>` dynamic path). There is no SQS receive/poll loop inside this process: one `RunTask` = one job (D-066).
+Python ECS worker that transcribes one audio Source per container invocation. The dispatcher Lambda is the SQS consumer (D-157) — it launches a `RunTask` for each message and injects the raw job payload as the `SQS_MESSAGE_BODY` container-override env var. There is no SQS receive/poll loop inside this process: one `RunTask` = one job (D-066).
 
 Two separate images are built from this repo — one per tier — each with its model weights baked in at build time (D-062). The infra resolves which image to pull per environment from an SSM parameter (`/heediq/transcription/{free,paid}-image-tag`) managed by CI's promotion step, not by CDK.
 
@@ -15,15 +15,15 @@ Two separate images are built from this repo — one per tier — each with its 
 - `src/diarizer.py` — `pyannote.audio` `Pipeline` wrapper (paid tier only; gated HuggingFace model, D-059/D-062)
 - `src/status_writer.py` — DynamoDB `update_item` for job status stages (fan-out to client via DDB Streams → Status Pusher Lambda → WebSocket, D-061)
 - `src/logger.py` — `create_logger(service)` structured JSON logger, hand-mirroring `@heediq/shared`'s `logger.ts` shape, PII denylist, and `LOG_LEVEL`-gated `debug`/`info`/`warn`/`error` threshold (default `info`) since this worker can't import the TS package (D-085, D-093); correlates by `source_id`
-- `src/sqs_client.py` — SQS sends: enqueue to `heediq-summarization` on completion (D-065); re-enqueue to `heediq-transcription` on SIGTERM with `tier` attribute preserved (D-066)
+- `src/sqs_client.py` — SQS sends: enqueue to `heediq-summarization` on completion (D-065); re-enqueue to `heediq-transcription` on SIGTERM (D-066) — `tier` travels in the body; no message attribute (D-157)
 - `Dockerfile.free` — base `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`; bakes `whisper small` weights; `WHISPER_MODEL=small DIARIZE=false`
 - `Dockerfile.paid` — same base; bakes `whisper large-v3` + pyannote speaker-diarization-3.1 via BuildKit secret mount (`--mount=type=secret,id=hf_token`); `WHISPER_MODEL=large-v3 DIARIZE=true`
-- `scripts/promote-transcription-worker.sh` — SSM put-parameter + register-task-definition + pipes update-pipe per tier; called by all three deploy jobs
+- `scripts/promote-transcription-worker.sh` — SSM put-parameter + register-task-definition per tier; called by all three deploy jobs (no pipe/target update — the dispatcher runs by family, D-157)
 
 ## Data Flow
 
 ```
-EventBridge Pipe (heediq-infra TranscriptionStack)
+Dispatcher Lambda (heediq-infra TranscriptionStack, D-157)
   └─ RunTask with SQS_MESSAGE_BODY container override
        │
        ▼
@@ -40,7 +40,7 @@ main() in worker.py
        summarizing → enqueue SummarizationJobMessage to heediq-summarization
   5. on SIGTERM before or during step 4:
        retrying   → DynamoDB status write
-       re-enqueue TranscriptionJobMessage to heediq-transcription with tier attribute
+       re-enqueue TranscriptionJobMessage to heediq-transcription (tier in body)
        sys.exit(0)
 ```
 
@@ -79,7 +79,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 | `AUDIO_BUCKET_NAME` | `heediq-audio-uploads-{accountId}` (bucket name is account-ID-suffixed for S3 global-uniqueness, not env-suffixed — account IS the environment per D-037) |
 | `TRANSCRIPTION_QUEUE_URL` | SQS queue URL (for SIGTERM re-enqueue, D-066) |
 | `SUMMARIZATION_QUEUE_URL` | SQS queue URL (enqueue after completion, D-065) |
-| `SQS_MESSAGE_BODY` | raw SQS message body, set by Pipe's `<$.body>` container override |
+| `SQS_MESSAGE_BODY` | raw SQS message body, set by the dispatcher Lambda's container override (D-157) |
 | `WHISPER_MODEL` | baked into image: `small` (free) or `large-v3` (paid) |
 | `DIARIZE` | baked into image: `false` (free) or `true` (paid) |
 
@@ -91,7 +91,7 @@ tier         string   — 'free' | 'paid' forwarded from TranscriptionJobMessage
 
 ## Dependencies
 
-- **Upstream:** heediq-infra `TranscriptionStack` (EventBridge Pipes, ECS task defs, IAM grants) + heediq-api Source job enqueue (must set `tier` SQS message attribute or the Pipe filter silently drops the job)
+- **Upstream:** heediq-infra `TranscriptionStack` (dispatcher Lambda, ECS task defs, IAM grants) + heediq-api Source job enqueue (`tier` in the message body — the dispatcher routes on it, D-157)
 - **Downstream:** `heediq-worker-summarization` reads `transcript` from `heediq-sources` by `sourceId` — `sourceType: 'text', contentRef: sourceId` in the enqueued message is the contract
 
 ## Testing

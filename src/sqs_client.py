@@ -13,10 +13,6 @@ def enqueue_summarization_job(sqs_client: Any, queue_url: str, message: Summariz
 
 
 def requeue_transcription_job(sqs_client: Any, queue_url: str, message: TranscriptionJobMessage) -> None:
-    # Same `tier` message attribute the original enqueue set (heediq-api) — required for the
-    # EventBridge Pipe filter to route the re-queued job to the right tier's pipe again.
-    sqs_client.send_message(
-        QueueUrl=queue_url,
-        MessageBody=message.to_json(),
-        MessageAttributes={"tier": {"DataType": "String", "StringValue": message.tier}},
-    )
+    # No `tier` message attribute — `tier` travels in the body and the dispatcher Lambda routes on
+    # it (D-157, replaces the tier-filtered EventBridge Pipes). Same shape as the original enqueue.
+    sqs_client.send_message(QueueUrl=queue_url, MessageBody=message.to_json())
