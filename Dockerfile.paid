@@ -4,7 +4,9 @@
 # pyannote's pretrained pipeline is a gated HF model — the bake step needs a HF token with
 # access accepted, passed as a BuildKit secret (never persisted in an image layer or in
 # GitHub Actions logs): `docker build --secret id=hf_token,env=HF_TOKEN -f Dockerfile.paid .`
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# Digest-pinned — see Dockerfile.free for the rationale and the command to resolve a new digest.
+# Keep this in lockstep with Dockerfile.free's base so both tiers share cached base layers.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04@sha256:2fcc4280646484290cc50dce5e65f388dd04352b07cbe89a635703bd1f9aedb6
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \

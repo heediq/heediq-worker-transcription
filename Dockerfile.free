@@ -1,6 +1,10 @@
 # Free tier: whisper small only (D-059, D-062, D-060). Model weights baked in at build time so
 # the EC2 GPU Spot task has zero network dependency at runtime — only the ECR pull on cold start.
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# Digest-pinned: nvidia repushes this mutable tag, and any repush silently busts the whole build
+# cache (the pip-install + model-bake layers) — a full rebuild once ran 5.5h. Bump this digest
+# deliberately when moving CUDA versions. Resolve a new one with:
+#   docker buildx imagetools inspect nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 --format '{{.Manifest.Digest}}'
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04@sha256:2fcc4280646484290cc50dce5e65f388dd04352b07cbe89a635703bd1f9aedb6
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
