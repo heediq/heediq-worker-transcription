@@ -39,14 +39,28 @@ jobs:
         run: pytest -q
 
   build-and-push:
-    name: Build & push images
+    name: Build & push ${{ matrix.tier }} image
     needs: test
     runs-on: ubuntu-latest
+    # A stalled build fails fast with retrievable logs instead of burning GitHub's 6h default. A
+    # registry-cache export once stalled and ran the full 6 hours, and the cancelled job left NO
+    # usable log — this ceiling turns that into a clean, debuggable failure.
+    timeout-minutes: 45
     permissions:
       id-token: write
       contents: read
-    outputs:
-      sha-tag: ${{ steps.sha.outputs.tag }}
+    strategy:
+      # The two images are independent — a stall or failure in one tier must not cancel the other.
+      fail-fast: false
+      matrix:
+        include:
+          - tier: free # whisper small only — no gated model, no build secret
+            dockerfile: Dockerfile.free
+          - tier: paid # whisper large-v3 + gated pyannote — needs the HF_TOKEN build secret
+            dockerfile: Dockerfile.paid
+    env:
+      # Line-based, complete, grep-able build logs (a cancelled TTY-progress build left us blind).
+      BUILDKIT_PROGRESS: plain
     steps:
       - uses: actions/checkout@v4
 
@@ -55,9 +69,9 @@ jobs:
         run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       # Push-only role, scoped to heediq-* ECR repos in the shared-services account (D-045).
-      # Distinct from GitHubActionsDeployRole, which is per-workload-account and used below to
-      # register task-definition revisions and update Pipes — pushing an image never needs
-      # access to a workload account.
+      # Distinct from GitHubActionsDeployRole, which is per-workload-account and used by the promote
+      # jobs to register task-definition revisions — pushing an image never needs workload-account
+      # access.
       - name: Configure AWS credentials (shared-services)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -69,43 +83,28 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Free tier — whisper small only, no gated model, no build secret needed.
-      # ECR registry cache (mode=max) so pip-install and model-weight layers are reused
-      # across runs. Images are multi-GB so GHA cache (10 GB repo limit) would be evicted
-      # immediately by the paid image; ECR has no practical size limit (~$0.10/GB/month).
-      - name: Build & push free image
+      # Per-tier ECR registry cache (mode=max) so the pip-install and model-weight layers are reused
+      # across runs. Images are multi-GB, so GHA cache (10 GB repo limit) would thrash; ECR has no
+      # practical size limit (~$0.10/GB/month). The base image is digest-pinned in the Dockerfiles,
+      # so an upstream mutable-tag repush can't silently bust the whole cache.
+      - name: Build & push ${{ matrix.tier }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.free
+          file: ${{ matrix.dockerfile }}
           push: true
-          # provenance/sbom default to true on v6 and push extra attestation manifests that
-          # ECR's untagged-image lifecycle rule can't clean up (still index-referenced by the
-          # tag) — D-108, this was the main driver of unbounded ECR storage growth.
+          # provenance/sbom default to true on v6 and push extra attestation manifests that ECR's
+          # untagged-image lifecycle rule can't clean up (still index-referenced by the tag) — D-108,
+          # the main driver of unbounded ECR storage growth.
           provenance: false
           sbom: false
-          tags: |
-            ${{ env.ECR_REPO }}:free-${{ steps.sha.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-free
-          cache-to: type=registry,ref=${{ env.ECR_REPO }}:cache-free,mode=max
-
-      # Paid tier — bakes the gated pyannote/speaker-diarization-3.1 pipeline at build time.
-      # HF_TOKEN is mounted as a BuildKit secret (not an ENV/ARG) so it never persists in any
-      # image layer or appears in this log.
-      - name: Build & push paid image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.paid
-          push: true
-          provenance: false
-          sbom: false
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
-          tags: |
-            ${{ env.ECR_REPO }}:paid-${{ steps.sha.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-paid
-          cache-to: type=registry,ref=${{ env.ECR_REPO }}:cache-paid,mode=max
+          # Only the paid image bakes the gated pyannote/speaker-diarization-3.1 pipeline; its
+          # HF_TOKEN is mounted as a BuildKit secret (never an ENV/ARG, so it never persists in a
+          # layer or appears in the log). The free build never receives the token.
+          secrets: ${{ matrix.tier == 'paid' && format('hf_token={0}', secrets.HF_TOKEN) || '' }}
+          tags: ${{ env.ECR_REPO }}:${{ matrix.tier }}-${{ steps.sha.outputs.tag }}
+          cache-from: type=registry,ref=${{ env.ECR_REPO }}:cache-${{ matrix.tier }}
+          cache-to: type=registry,ref=${{ env.ECR_REPO }}:cache-${{ matrix.tier }},mode=max
 
   promote-dev:
     name: Promote → dev
@@ -125,10 +124,10 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_DEV }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # The sha-tag is derived from the commit, not threaded through a job output — the build is now
+      # a matrix (per-tier) and matrix jobs can't cleanly expose a single scalar output.
       - name: Promote free & paid tiers
-        env:
-          SHA_TAG: ${{ needs.build-and-push.outputs.sha-tag }}
-        run: ./scripts/promote-transcription-worker.sh "$SHA_TAG"
+        run: ./scripts/promote-transcription-worker.sh "sha-${GITHUB_SHA::7}"
 
   promote-staging:
     name: Promote → staging
@@ -149,9 +148,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Promote free & paid tiers
-        env:
-          SHA_TAG: ${{ needs.build-and-push.outputs.sha-tag }}
-        run: ./scripts/promote-transcription-worker.sh "$SHA_TAG"
+        run: ./scripts/promote-transcription-worker.sh "sha-${GITHUB_SHA::7}"
 
   promote-prod:
     name: Promote → prod
@@ -172,6 +169,4 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Promote free & paid tiers
-        env:
-          SHA_TAG: ${{ needs.build-and-push.outputs.sha-tag }}
-        run: ./scripts/promote-transcription-worker.sh "$SHA_TAG"
+        run: ./scripts/promote-transcription-worker.sh "sha-${GITHUB_SHA::7}"
